@@ -25,10 +25,20 @@ export default function ProjectPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [askingQuestion, setAskingQuestion] = useState(false);
-  const [activeTab, setActiveTab] = useState<"files" | "pdf" | "video">("files");
+  const [pdfQuestion, setPdfQuestion] = useState("");
+  const [pdfAnswer, setPdfAnswer] = useState("");
+  const [askingPdfQuestion, setAskingPdfQuestion] = useState(false);
+  const [videoQuestion, setVideoQuestion] = useState("");
+  const [videoAnswer, setVideoAnswer] = useState("");
+  const [askingVideoQuestion, setAskingVideoQuestion] = useState(false);
+  const [pdfSummary, setPdfSummary] = useState("");
+  const [summarizingPdf, setSummarizingPdf] = useState(false);
+  const [videoSummary, setVideoSummary] = useState("");
+  const [summarizingVideo, setSummarizingVideo] = useState(false);
+  const [shareEmail, setShareEmail] = useState("");
+  const [sharing, setSharing] = useState(false);
+  const [sharedUsers, setSharedUsers] = useState<any[]>([]);
+  const [loadingShared, setLoadingShared] = useState(false);
   const router = useRouter();
   const params = useParams();
   const projectId = params.id as string;
@@ -58,7 +68,23 @@ export default function ProjectPage() {
     };
 
     fetchProject();
+    fetchSharedUsers();
   }, [projectId, router]);
+
+  const fetchSharedUsers = async () => {
+    try {
+      setLoadingShared(true);
+      const response = await fetch(`/api/projects/${projectId}/share`);
+      if (response.ok) {
+        const data = await response.json();
+        setSharedUsers(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch shared users:", err);
+    } finally {
+      setLoadingShared(false);
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -124,19 +150,19 @@ export default function ProjectPage() {
     }
   };
 
-  const handleAskQuestion = async (e: React.FormEvent) => {
+  const handleAskPdfQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!question.trim()) return;
+    if (!pdfQuestion.trim()) return;
 
-    setAskingQuestion(true);
+    setAskingPdfQuestion(true);
     setError("");
-    setAnswer("");
+    setPdfAnswer("");
 
     try {
       const response = await fetch(`/api/projects/${projectId}/ask-pdf`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question: pdfQuestion }),
       });
 
       if (!response.ok) {
@@ -146,12 +172,125 @@ export default function ProjectPage() {
       }
 
       const data = await response.json();
-      setAnswer(data.answer);
+      setPdfAnswer(data.answer);
     } catch (err) {
       setError("An error occurred");
       console.error(err);
     } finally {
-      setAskingQuestion(false);
+      setAskingPdfQuestion(false);
+    }
+  };
+
+  const handleSummarizePdf = async () => {
+    setSummarizingPdf(true);
+    setError("");
+    setPdfSummary("");
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/summarize-pdf`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.error || "Failed to summarize");
+        return;
+      }
+
+      const data = await response.json();
+      setPdfSummary(data.summary);
+    } catch (err) {
+      setError("An error occurred");
+      console.error(err);
+    } finally {
+      setSummarizingPdf(false);
+    }
+  };
+
+  const handleAskVideoQuestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!videoQuestion.trim()) return;
+
+    setAskingVideoQuestion(true);
+    setError("");
+    setVideoAnswer("");
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/ask-video`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: videoQuestion }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.error || "Failed to get answer");
+        return;
+      }
+
+      const data = await response.json();
+      setVideoAnswer(data.answer);
+    } catch (err) {
+      setError("An error occurred");
+      console.error(err);
+    } finally {
+      setAskingVideoQuestion(false);
+    }
+  };
+
+  const handleSummarizeVideo = async () => {
+    setSummarizingVideo(true);
+    setError("");
+    setVideoSummary("");
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/summarize-video`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.error || "Failed to summarize");
+        return;
+      }
+
+      const data = await response.json();
+      setVideoSummary(data.summary);
+    } catch (err) {
+      setError("An error occurred");
+      console.error(err);
+    } finally {
+      setSummarizingVideo(false);
+    }
+  };
+
+  const handleShareProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shareEmail.trim()) return;
+
+    setSharing(true);
+    setError("");
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: shareEmail }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.error || "Failed to share project");
+        return;
+      }
+
+      setShareEmail("");
+      await fetchSharedUsers();
+    } catch (err) {
+      setError("An error occurred");
+      console.error(err);
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -274,56 +413,161 @@ export default function ProjectPage() {
           </div>
 
           {/* AI Tools Section */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-2xl font-bold mb-6">AI Tools</h2>
+          <div className="space-y-6">
+            {/* PDF Tools */}
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h2 className="text-2xl font-bold mb-6">📄 PDF Tools</h2>
 
-            <div className="space-y-4">
-              <button
-                className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50"
-                disabled
-              >
-                Summarize PDF
-              </button>
+              <div className="space-y-4">
+                <button
+                  onClick={handleSummarizePdf}
+                  disabled={summarizingPdf || !project.files?.some((f) => f.type === "pdf")}
+                  className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                >
+                  {summarizingPdf ? "Summarizing..." : "📝 Summarize PDFs"}
+                </button>
 
-              <button
-                className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50"
-                disabled
-              >
-                Summarize Video
-              </button>
+                {pdfSummary && (
+                  <div className="p-4 bg-blue-50 rounded-md">
+                    <h4 className="font-bold mb-2">Summary:</h4>
+                    <p className="text-sm text-gray-900 whitespace-pre-wrap">{pdfSummary}</p>
+                  </div>
+                )}
+              </div>
 
-              <button
-                className="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50"
-                disabled
-              >
-                Share Project
-              </button>
+              {/* PDF Q&A */}
+              <div className="mt-6 pt-6 border-t">
+                <h3 className="font-bold text-lg mb-4">❓ Ask Questions About PDFs</h3>
+                <form onSubmit={handleAskPdfQuestion} className="space-y-4">
+                  <textarea
+                    value={pdfQuestion}
+                    onChange={(e) => setPdfQuestion(e.target.value)}
+                    placeholder="Ask a question about your PDFs..."
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    rows={3}
+                    disabled={askingPdfQuestion || !project.files?.some((f) => f.type === "pdf")}
+                  />
+                  <button
+                    type="submit"
+                    disabled={
+                      askingPdfQuestion ||
+                      !project.files?.some((f) => f.type === "pdf") ||
+                      !pdfQuestion.trim()
+                    }
+                    className="w-full bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {askingPdfQuestion ? "Thinking..." : "Ask"}
+                  </button>
+                </form>
+
+                {pdfAnswer && (
+                  <div className="mt-4 p-4 bg-purple-50 rounded-md">
+                    <p className="text-sm text-gray-900">{pdfAnswer}</p>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Q&A Section */}
-            <div className="mt-8 pt-6 border-t">
-              <h3 className="font-bold text-lg mb-4">Ask Questions</h3>
-              <form onSubmit={handleAskQuestion} className="space-y-4">
-                <textarea
-                  value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
-                  placeholder="Ask a question about your PDFs..."
-                  className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  rows={3}
-                  disabled={askingQuestion || !project.files?.length}
-                />
+            {/* Video Tools */}
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h2 className="text-2xl font-bold mb-6">🎥 Video Tools</h2>
+
+              <div className="space-y-4">
                 <button
-                  type="submit"
-                  disabled={askingQuestion || !project.files?.length || !question.trim()}
-                  className="w-full bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleSummarizeVideo}
+                  disabled={summarizingVideo || !project.files?.some((f) => f.type === "video")}
+                  className="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                 >
-                  {askingQuestion ? "Thinking..." : "Ask"}
+                  {summarizingVideo ? "Summarizing..." : "📝 Summarize Videos"}
                 </button>
+
+                {videoSummary && (
+                  <div className="p-4 bg-green-50 rounded-md">
+                    <h4 className="font-bold mb-2">Summary:</h4>
+                    <p className="text-sm text-gray-900 whitespace-pre-wrap">{videoSummary}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Video Q&A */}
+              <div className="mt-6 pt-6 border-t">
+                <h3 className="font-bold text-lg mb-4">❓ Ask Questions About Videos</h3>
+                <form onSubmit={handleAskVideoQuestion} className="space-y-4">
+                  <textarea
+                    value={videoQuestion}
+                    onChange={(e) => setVideoQuestion(e.target.value)}
+                    placeholder="Ask a question about your videos..."
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    rows={3}
+                    disabled={
+                      askingVideoQuestion || !project.files?.some((f) => f.type === "video")
+                    }
+                  />
+                  <button
+                    type="submit"
+                    disabled={
+                      askingVideoQuestion ||
+                      !project.files?.some((f) => f.type === "video") ||
+                      !videoQuestion.trim()
+                    }
+                    className="w-full bg-orange-600 text-white px-4 py-2 rounded-md hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {askingVideoQuestion ? "Thinking..." : "Ask"}
+                  </button>
+                </form>
+
+                {videoAnswer && (
+                  <div className="mt-4 p-4 bg-orange-50 rounded-md">
+                    <p className="text-sm text-gray-900">{videoAnswer}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Share Project */}
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h2 className="text-2xl font-bold mb-6">🔗 Share Project</h2>
+
+              <form onSubmit={handleShareProject} className="space-y-4 mb-6">
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={shareEmail}
+                    onChange={(e) => setShareEmail(e.target.value)}
+                    placeholder="Enter email to share with..."
+                    className="flex-1 border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    disabled={sharing}
+                  />
+                  <button
+                    type="submit"
+                    disabled={sharing || !shareEmail.trim()}
+                    className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium whitespace-nowrap"
+                  >
+                    {sharing ? "Sharing..." : "Share"}
+                  </button>
+                </div>
               </form>
 
-              {answer && (
-                <div className="mt-4 p-4 bg-purple-50 rounded-md">
-                  <p className="text-sm text-gray-900">{answer}</p>
+              {sharedUsers && sharedUsers.length > 0 && (
+                <div>
+                  <h4 className="font-bold mb-3">Shared with:</h4>
+                  <div className="space-y-2">
+                    {sharedUsers.map((share: any) => (
+                      <div
+                        key={share.id}
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded-md"
+                      >
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {share.sharedWithUser.name}
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            {share.sharedWithUser.email}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
