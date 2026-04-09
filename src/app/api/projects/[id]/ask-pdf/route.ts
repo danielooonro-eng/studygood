@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUserIdFromToken } from "@/lib/auth";
 import { extractTextFromPDF } from "@/lib/pdf";
+import { askPdfQuestion, cleanTextForProcessing, truncateText } from "@/lib/ai";
 
 // POST /api/projects/[id]/ask-pdf - Ask question about PDF
 export async function POST(
@@ -18,9 +19,17 @@ export async function POST(
     const { id } = await params;
     const { question } = await request.json();
 
-    if (!question) {
+    // Validate question
+    if (!question || typeof question !== "string") {
       return NextResponse.json(
-        { error: "Question is required" },
+        { error: "Valid question is required" },
+        { status: 400 }
+      );
+    }
+
+    if (question.trim().length === 0) {
+      return NextResponse.json(
+        { error: "Question cannot be empty" },
         { status: 400 }
       );
     }
@@ -57,12 +66,15 @@ export async function POST(
 
     // Extract text from all PDFs
     let combinedText = "";
+    const failedFiles: string[] = [];
+
     for (const file of pdfFiles) {
       try {
         const text = await extractTextFromPDF(file.filePath);
         combinedText += text + "\n";
       } catch (err) {
         console.error(`Error processing file ${file.fileName}:`, err);
+        failedFiles.push(file.fileName);
       }
     }
 
@@ -73,23 +85,29 @@ export async function POST(
       );
     }
 
-    // TODO: Integrate with Abacus.AI for actual Q&A
-    // For now, return a placeholder response
-    // const client = abacusai.ApiClient();
-    // const answer = await client.answerQuestion(combinedText, question);
+    // Clean and prepare text for AI processing
+    const cleanedText = cleanTextForProcessing(combinedText);
+    
+    // Truncate to reasonable length for AI API
+    const processedText = truncateText(cleanedText, 8000);
 
-    // Placeholder response with mock answer
-    const answer = `Based on the documents in your project, I would analyze the content to answer your question: "${question}". 
+    // Get AI answer using Abacus AI
+    const answer = await askPdfQuestion(processedText, question.trim());
 
-This is a placeholder response. To enable AI-powered Q&A, integrate with Abacus.AI API in the /src/lib/ai.ts file.
-
-The system would extract key information from your PDFs and provide accurate, contextual answers.`;
-
-    return NextResponse.json({ answer }, { status: 200 });
+    return NextResponse.json(
+      {
+        answer,
+        question: question.trim(),
+        sourcesUsed: pdfFiles.length,
+        sourceFiles: pdfFiles.map((f) => f.fileName),
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("Ask PDF error:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: `Failed to answer question: ${errorMessage}` },
       { status: 500 }
     );
   }

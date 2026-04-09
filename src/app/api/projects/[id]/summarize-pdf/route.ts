@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUserIdFromToken } from "@/lib/auth";
 import { extractTextFromPDF } from "@/lib/pdf";
+import { summarizePdf, cleanTextForProcessing, truncateText } from "@/lib/ai";
 
 // POST /api/projects/[id]/summarize-pdf - Summarize PDF content
 export async function POST(
@@ -49,12 +50,15 @@ export async function POST(
 
     // Extract text from all PDFs
     let combinedText = "";
+    const failedFiles: string[] = [];
+
     for (const file of pdfFiles) {
       try {
         const text = await extractTextFromPDF(file.filePath);
         combinedText += text + "\n";
       } catch (err) {
         console.error(`Error processing file ${file.fileName}:`, err);
+        failedFiles.push(file.fileName);
       }
     }
 
@@ -65,39 +69,33 @@ export async function POST(
       );
     }
 
-    // TODO: Integrate with Abacus.AI for actual summarization
-    // const client = abacusai.ApiClient();
-    // const summary = await client.summarizeText(combinedText);
+    // Clean and prepare text for AI processing
+    const cleanedText = cleanTextForProcessing(combinedText);
+    
+    // Truncate to reasonable length for AI API
+    const processedText = truncateText(cleanedText, 8000);
 
-    // Placeholder summary
-    const summary = `
-# Document Summary
+    // Get AI summary using Abacus AI
+    const summary = await summarizePdf(processedText);
 
-This is a placeholder summary. To enable AI-powered summarization, integrate with Abacus.AI API.
-
-## Key Points:
-- Your document has been analyzed
-- The system would extract main concepts and themes
-- A comprehensive summary would be generated highlighting the most important information
-
-## Document Statistics:
-- Total words: ${combinedText.split(/\s+/).length}
-- Total characters: ${combinedText.length}
-- Number of PDF files: ${pdfFiles.length}
-
-## How to Enable AI Summarization:
-1. Connect to Abacus.AI API
-2. Configure the summarization model
-3. Process your PDFs through the model
-4. Receive intelligent, concise summaries
-
-For more information, visit the Abacus.AI documentation.`;
-
-    return NextResponse.json({ summary }, { status: 200 });
+    return NextResponse.json(
+      {
+        summary,
+        stats: {
+          totalWords: combinedText.split(/\s+/).length,
+          totalCharacters: combinedText.length,
+          pdfCount: pdfFiles.length,
+          processedFiles: pdfFiles.length - failedFiles.length,
+          failedFiles: failedFiles.length > 0 ? failedFiles : undefined,
+        },
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("Summarize PDF error:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: `Failed to summarize PDFs: ${errorMessage}` },
       { status: 500 }
     );
   }

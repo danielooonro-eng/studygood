@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUserIdFromToken } from "@/lib/auth";
+import {
+  summarizeYoutubeVideo,
+  cleanTextForProcessing,
+  truncateText,
+} from "@/lib/ai";
 
 // POST /api/projects/[id]/summarize-video - Summarize video content
 export async function POST(
@@ -15,6 +20,7 @@ export async function POST(
     }
 
     const { id } = await params;
+    const { videoUrl } = await request.json();
 
     // Verify project ownership
     const project = await prisma.project.findUnique({
@@ -46,43 +52,84 @@ export async function POST(
       );
     }
 
-    // TODO: Integrate with Abacus.AI for video summarization
-    // Extract video transcript and process with AI
+    let summary = "";
+    let videoProcessed = false;
 
-    const summary = `
+    // If a YouTube URL is provided, try to summarize that
+    if (videoUrl && typeof videoUrl === "string" && videoUrl.trim().length > 0) {
+      try {
+        summary = await summarizeYoutubeVideo(videoUrl);
+        videoProcessed = true;
+      } catch (err) {
+        console.error("Error summarizing YouTube video:", err);
+        // Fall through to local video processing if YouTube fails
+      }
+    }
+
+    // If no YouTube URL or it failed, provide guidance for local videos
+    if (!videoProcessed) {
+      summary = `
 # Video Summary
 
-This is a placeholder summary. To enable AI-powered video summarization, integrate with Abacus.AI API.
+Video files uploaded to this project:
 
-## Video Information:
-- Number of videos: ${videoFiles.length}
-- Video files:
-${videoFiles.map((f) => `  - ${f.fileName}`).join("\n")}
+${videoFiles
+  .map(
+    (f) => `- **${f.fileName}** (${(f.fileSize / 1024 / 1024).toFixed(2)} MB)`
+  )
+  .join("\n")}
 
-## How Summarization Works:
-1. Extract transcript from video files
-2. Process through AI summarization model
-3. Generate key points and highlights
-4. Create timeline-based summary
+## How to Summarize:
 
-## Key Features to Enable:
-- Automatic transcript extraction
-- Multi-language support
-- Timestamp-based summaries
-- Key moment detection
+For **YouTube videos**, provide the video URL in your request:
+- Full URL: \`https://www.youtube.com/watch?v=VIDEO_ID\`
+- Short URL: \`https://youtu.be/VIDEO_ID\`
 
-## Placeholder Content:
-The system would analyze your videos and extract:
-- Main topics discussed
-- Important timestamps
-- Key takeaways
-- Relevant sections for study`;
+The system will:
+1. Extract the video transcript
+2. Process it through AI summarization
+3. Generate key points and insights
 
-    return NextResponse.json({ summary }, { status: 200 });
+## Local Videos:
+For locally uploaded video files, the system can analyze:
+- File metadata
+- Audio content (when transcript available)
+- Video duration and format information
+
+**To summarize YouTube videos, include the \`videoUrl\` parameter in your request.**
+
+---
+
+To enable full video summarization:
+1. Provide YouTube video URLs
+2. Or upload videos with transcript files
+3. The AI will generate comprehensive summaries
+
+**Example Request:**
+\`\`\`json
+{
+  "videoUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+}
+\`\`\``;
+    }
+
+    return NextResponse.json(
+      {
+        summary,
+        videoCount: videoFiles.length,
+        videoFiles: videoFiles.map((f) => ({
+          name: f.fileName,
+          size: f.fileSize,
+        })),
+        processed: videoProcessed,
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("Summarize video error:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: `Failed to summarize videos: ${errorMessage}` },
       { status: 500 }
     );
   }
