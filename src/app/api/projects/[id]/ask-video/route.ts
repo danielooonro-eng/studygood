@@ -153,10 +153,22 @@ To enable Q&A for local videos:
       { status: 200 }
     );
   } catch (error) {
-    console.error("Ask video error:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : "";
+    
+    console.error("[ask-video] Error:", {
+      message: errorMessage,
+      stack: errorStack,
+      timestamp: new Date().toISOString(),
+    });
+    
     return NextResponse.json(
-      { error: `Failed to answer video question: ${errorMessage}` },
+      { 
+        error: `Failed to answer video question: ${errorMessage}`,
+        details: {
+          timestamp: new Date().toISOString(),
+        }
+      },
       { status: 500 }
     );
   }

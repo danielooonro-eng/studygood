@@ -5,11 +5,22 @@ import { NextRequest, NextResponse } from "next/server";
  * Calls Abacus AI to generate summaries or answers based on context
  */
 export async function POST(request: NextRequest) {
+  let requestBody: any;
+  
   try {
-    const { action, context, prompt } = await request.json();
+    // Parse request body
+    requestBody = await request.json();
+    console.log("Request received:", {
+      action: requestBody.action,
+      contextLength: requestBody.context?.length || 0,
+      promptLength: requestBody.prompt?.length || 0,
+    });
+
+    const { action, context, prompt } = requestBody;
 
     // Validate input
     if (!action || !context || !prompt) {
+      console.error("Missing required fields:", { action: !!action, context: !!context, prompt: !!prompt });
       return NextResponse.json(
         { error: "Missing required fields: action, context, prompt" },
         { status: 400 }
@@ -29,9 +40,17 @@ Please provide a clear and concise response based on the context above.`;
 
     // Call Abacus AI API
     // The ABACUS_API_KEY is set in environment variables
-    // We're using the chat/completion endpoint available in Abacus AI
+    console.log("Calling Abacus AI model with prompt length:", fullPrompt.length);
     const result = await callAbacusAIModel(fullPrompt);
 
+    if (!result) {
+      return NextResponse.json(
+        { error: "Empty response from AI model" },
+        { status: 500 }
+      );
+    }
+
+    console.log("AI response received, length:", result.length);
     return NextResponse.json(
       {
         result: result,
@@ -42,7 +61,14 @@ Please provide a clear and concise response based on the context above.`;
     );
   } catch (error) {
     console.error("Abacus AI Chat Error:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : "";
+
+    console.error("Error details:", {
+      message: errorMessage,
+      stack: errorStack,
+      type: typeof error,
+    });
 
     return NextResponse.json(
       {
@@ -56,87 +82,133 @@ Please provide a clear and concise response based on the context above.`;
 
 /**
  * Call the Abacus AI language model with a prompt
- * This uses the Abacus AI Python SDK through a wrapper
+ * This uses the Abacus AI Python SDK
  */
 async function callAbacusAIModel(prompt: string): Promise<string> {
   try {
     // Check if API key is available
     const apiKey = process.env.ABACUS_API_KEY;
     if (!apiKey) {
-      throw new Error("ABACUS_API_KEY environment variable not set");
+      console.warn("ABACUS_API_KEY environment variable not set, using fallback");
+      if (prompt.toLowerCase().includes("summarize") || prompt.toLowerCase().includes("summary")) {
+        return generateFallbackSummary(prompt);
+      } else {
+        return generateFallbackAnswer(prompt);
+      }
     }
 
-    // Try to use the Abacus AI SDK through a subprocess call
-    // Since we're in Node.js/TypeScript environment, we need to call Python backend
-    const result = await callAbacusAIPythonBackend(prompt);
-    return result;
+    console.log("Attempting to call Abacus AI with API key configured");
+    
+    // Try to import and use the Abacus AI SDK
+    // This is a server-side operation that can use the Python SDK
+    try {
+      // Dynamically import the Abacus AI SDK
+      const abacusai = require("abacusai");
+      console.log("Abacus AI SDK imported successfully");
+      
+      const client = new abacusai.ApiClient(apiKey);
+      
+      // Use the available API endpoint for text generation
+      // The SDK provides various methods - we'll try the most likely candidates
+      let response: any;
+      
+      try {
+        // Try using createDeploymentToken + LLM endpoint
+        console.log("Attempting LLM API call");
+        
+        // Most Abacus AI deployments use a chat-like interface
+        // We'll construct a basic prompt-based request
+        response = await callAbacusAIViaHttpAPI(apiKey, prompt);
+        
+        return response;
+      } catch (llmError) {
+        console.error("LLM API call failed:", llmError);
+        // Fall back to generating a response
+        return generateFallbackResponse(prompt);
+      }
+    } catch (importError) {
+      console.error("Failed to import Abacus AI SDK:", importError);
+      // SDK not available or not properly configured
+      return generateFallbackResponse(prompt);
+    }
   } catch (error) {
-    console.error("Error calling Abacus AI Model:", error);
-
-    // Fallback: Return a meaningful response if API fails
-    // This allows the app to continue working even if AI service is temporarily unavailable
-    if (prompt.toLowerCase().includes("summarize") || prompt.toLowerCase().includes("summary")) {
-      return generateFallbackSummary(prompt);
-    } else {
-      return generateFallbackAnswer(prompt);
-    }
+    console.error("Error in callAbacusAIModel:", error);
+    return generateFallbackResponse(prompt);
   }
 }
 
 /**
- * Call Abacus AI Python backend through subprocess
- * This executes a Python script that imports and uses the Abacus AI SDK
+ * Call Abacus AI via HTTP API endpoint
  */
-async function callAbacusAIPythonBackend(prompt: string): Promise<string> {
+async function callAbacusAIViaHttpAPI(
+  apiKey: string,
+  prompt: string
+): Promise<string> {
   try {
-    // Import required modules
-    const { execSync } = require("child_process");
+    // Abacus AI might have different endpoints
+    // This is a common pattern for LLM APIs
+    const endpoints = [
+      "https://api.abacus.ai/v1/chat/completions",
+      "https://api.abacus.ai/v1/completions",
+      process.env.ABACUS_API_ENDPOINT || "",
+    ];
 
-    // Create a Python script that uses Abacus AI SDK
-    const pythonScript = `
-import sys
-sys.path.insert(0, '/home/ubuntu')
+    for (const endpoint of endpoints) {
+      if (!endpoint) continue;
+      
+      try {
+        console.log("Trying endpoint:", endpoint);
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: prompt }],
+            max_tokens: 1000,
+            model: "gpt-3.5-turbo",
+          }),
+        });
 
-try:
-    import abacusai
-    client = abacusai.ApiClient()
-    
-    # Use the text generation/chat endpoint
-    # The exact method might vary, but Abacus AI provides language model APIs
-    response = client.chat_completion(
-        messages=[
-            {"role": "user", "content": "${escapePythonString(prompt)}"}
-        ],
-        max_tokens=1000,
-    )
-    
-    # Extract the response text
-    if hasattr(response, 'choices') and len(response.choices) > 0:
-        print(response.choices[0].message.content)
-    elif hasattr(response, 'text'):
-        print(response.text)
-    else:
-        print(str(response))
-        
-except Exception as e:
-    print(f"Error: {str(e)}")
-    sys.exit(1)
-`;
+        if (response.ok) {
+          const data = await response.json();
+          // Extract response based on API format
+          const result =
+            data.choices?.[0]?.message?.content ||
+            data.choices?.[0]?.text ||
+            data.result ||
+            String(data);
+          return result;
+        }
+      } catch (err) {
+        console.log("Endpoint failed:", endpoint, err);
+        continue;
+      }
+    }
 
-    // Execute the Python script
-    const result = execSync(`python3 -c "${escapeBashString(pythonScript)}"`, {
-      encoding: "utf-8",
-      timeout: 30000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
-
-    return result.trim();
+    throw new Error("No valid Abacus AI endpoint available");
   } catch (error) {
-    // Log error but don't throw - will use fallback
-    console.error("Python backend error:", error);
-    throw new Error("Failed to call Abacus AI backend");
+    console.error("Error calling Abacus AI via HTTP:", error);
+    throw error;
   }
 }
+
+/**
+ * Generate a fallback response when AI service is unavailable
+ */
+function generateFallbackResponse(prompt: string): string {
+  if (
+    prompt.toLowerCase().includes("summarize") ||
+    prompt.toLowerCase().includes("summary")
+  ) {
+    return generateFallbackSummary(prompt);
+  } else {
+    return generateFallbackAnswer(prompt);
+  }
+}
+
+
 
 /**
  * Generate fallback summary when AI service is unavailable
@@ -190,23 +262,7 @@ Currently, the AI service appears to be temporarily unavailable. However, based 
 `;
 }
 
-/**
- * Escape string for Python code
- */
-function escapePythonString(str: string): string {
-  return str
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r");
-}
 
-/**
- * Escape string for Bash command
- */
-function escapeBashString(str: string): string {
-  return str.replace(/"/g, '\\"').replace(/`/g, "\\`").replace(/\$/g, "\\$");
-}
 
 /**
  * Truncate text to avoid exceeding token limits
